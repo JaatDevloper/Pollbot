@@ -7,12 +7,12 @@ import asyncio
 import os
 
 # Define your API credentials and string session
-api_id = '28624690'  # Replace with your API ID
-api_hash = '67e6593b5a9b5ab20b11ccef6700af5b'  # Replace with your API Hash
+api_id = '27488818'  # Replace with your API ID
+api_hash = '321fb972c3c3aee2dbdca1deeab39050'  # Replace with your API Hash
 phone = '+919351504990'  # Replace with your phone number
 
 # You can use your string session here or load it from an environment variable
-string_session = os.getenv('1BVtsOKEBu0M0NiU2jKhDl1XFCRgj6MxCBfeYIW8VDHP-LX_BR-bTDOWByKUfiiw9Y-EjjhXCaZ0zcZjRxlirhR6nPKxpC1st_PW4kAZbMp6TLvgUXMOkVSd5rzz-vWxOZcd6WsdLxWjs9-lhi-xfWgL23p2iLGXyZi-BW17o3X38C3K-sHavdR1ggmV598L6x6bXnclPcQNmCDIBQF7KakTF0-k-Em33zsy4N-rUhb2egQO4k98F6DYTnnHQVwgJnlpLPFJdZ8g9-LDmqgUEmRsoXoUVx_Hf0lB7ykIpzlXUOeabteip8OsiSaFPIPj2f90wVCIxnfmXm1LMF70N9Z3HGVUa2g0=')  # Set this environment variable for production
+string_session = os.getenv('1BVtsOKEBu1n1e48GEEoqRlPzUUy1CloJ4rwmCDOAfcyXvjPKoxgDTLfoypsaQxMKqqcXRTZ7Z7gACuECJuX8GnpAtiVMNTRQKMphB7j-Un7nILgKZ_EfYd1uwBMXN3WU1rPHsenQRxuhWsXcIx9T7hU2hF_za2l2saJhsj5N5WuvfazFBdX01sXV3y6PbCCYW4eSxBFhrcqR7cHoAoJWNlphdk7jygTHlltDbAt2aJzBKn_JBJgStE08OG5sFjkYQvnrMEJV7dpFjwPzW3akWHWGdFqdwNqDEz4yn6gnWP3wDZRsWOMy8r9FCmFpcx5V28g3d8L07XdkWtSHgDYoN9aK9kU1a9A=')  # Set this environment variable for production
 # Or load it from a file if you're saving it
 # with open('string_session.txt', 'r') as f:
 #     string_session = f.read().strip()
