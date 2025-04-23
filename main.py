@@ -4,11 +4,11 @@ import os
 import asyncio
 from flask import Flask
 
-# API credentials
-api_id = 27488818
-api_hash = '321fb972c3c3aee2dbdca1deeab39050'
+# Define your API credentials
+api_id = 27488818  # Replace with your API ID
+api_hash = '321fb972c3c3aee2dbdca1deeab39050'  # Replace with your API Hash
 
-# Load string session
+# Load string session from the string_session.txt file
 if os.path.exists("string_session.txt"):
     with open("string_session.txt", "r") as f:
         string_session = f.read().strip()
@@ -18,52 +18,49 @@ else:
 if not string_session:
     raise ValueError("String session is empty!")
 
-# Init client
 client = TelegramClient(StringSession(string_session), api_id, api_hash)
 
-# Flask app for health checks
+# Flask app for health check
 app = Flask(__name__)
 
 @app.route("/health")
 def health_check():
     return "OK", 200
 
-# User state
+# State tracking
 user_states = {}
 
-# /start command
-@client.on(events.NewMessage(pattern='/start'))
-async def start(event):
-    await event.reply("Userbot is active and working!")
-
-# /extract command
 @client.on(events.NewMessage(pattern='/extract'))
-async def start_extract(event):
+async def extract_command(event):
     user_id = event.sender_id
     user_states[user_id] = {'stage': 'awaiting_first_url'}
     await event.reply("Please send me the Link to the first message (containing the first poll or any message before the polls)\nExample: https://t.me/channel/123")
 
-# Poll URL handling
-@client.on(events.NewMessage(incoming=True))
-async def handle_links(event):
+@client.on(events.NewMessage)
+async def handle_poll_links(event):
     user_id = event.sender_id
     text = event.raw_text.strip()
 
-    # Ignore if it's a command
-    if text.startswith('/'):
+    if user_id not in user_states:
         return
 
-    # If user is not in flow
-    if user_id not in user_states:
+    if text.startswith("/"):
         return
 
     state = user_states[user_id]
 
     if state['stage'] == 'awaiting_first_url':
+        if 'https://t.me/' not in text:
+            await event.reply("Please send a valid Telegram message link.")
+            return
         state['first_url'] = text
         state['stage'] = 'awaiting_last_url'
         await event.reply("Got it! Now, please send me the link to the last message after the poll.")
+
     elif state['stage'] == 'awaiting_last_url':
+        if 'https://t.me/' not in text:
+            await event.reply("Please send a valid Telegram message link.")
+            return
         state['last_url'] = text
         await event.reply("Processing, please wait...")
 
@@ -79,43 +76,55 @@ async def handle_links(event):
 
         del user_states[user_id]
 
-# Extract polls
-async def extract_polls(event, channel_username, first_id, last_id):
-    channel = await client.get_entity(channel_username)
-    valid_polls = []
-    progress = 0
-    total = last_id - first_id + 1
+# Extract polls between two message IDs
+async def extract_polls(event, channel_username, first_message_id, last_message_id):
+    try:
+        channel = await client.get_entity(channel_username)
 
-    async for message in client.iter_messages(channel, min_id=first_id - 1, max_id=last_id + 1):
-        if message.poll:
-            question = message.poll.question
-            answers = [a.text for a in message.poll.answers]
-            correct_answer = next((a.text for a in message.poll.answers if getattr(a, 'correct', False)), None)
+        valid_polls = []
+        total = last_message_id - first_message_id + 1
+        count = 0
 
-            valid_polls.append((question, answers, correct_answer))
+        async for message in client.iter_messages(channel, min_id=first_message_id, max_id=last_message_id):
+            if message.poll:
+                question = message.poll.question
+                answers = [a.text for a in message.poll.answers]
+                correct_answer = None
+                for ans in message.poll.answers:
+                    if getattr(ans, 'correct', False):
+                        correct_answer = ans.text
+                        break
+                valid_polls.append((question, answers, correct_answer))
 
-        progress += 1
-        if progress % 10 == 0:
-            await event.reply(f"Processed {progress}/{total} messages... Found {len(valid_polls)} polls.")
+            count += 1
+            if count % 10 == 0 or count == total:
+                await event.reply(f"Processed {count}/{total} messages...\nFound {len(valid_polls)} valid polls so far.")
 
-    await generate_txt(valid_polls, event)
+        await generate_txt(valid_polls, event)
 
-# Generate .txt file
-async def generate_txt(polls, event):
+    except Exception as e:
+        await event.reply(f"Error while extracting polls: {e}")
+
+# Generate a .txt file with results
+async def generate_txt(valid_polls, event):
     text = ""
-    for idx, (question, answers, correct) in enumerate(polls, 1):
+    for idx, (question, answers, correct_answer) in enumerate(valid_polls, 1):
         text += f"Q{idx}. {question}\n"
         for ans in answers:
-            mark = '✅' if ans == correct else '⬜'
-            text += f"  {mark} {ans}\n"
+            prefix = "✅" if ans == correct_answer else "⬜"
+            text += f"  {prefix} {ans}\n"
         text += "\n"
 
-    with open('quiz_results.txt', 'w', encoding='utf-8') as f:
-        f.write(text)
+    with open('quiz_results.txt', 'w', encoding='utf-8') as file:
+        file.write(text)
 
     await event.reply(file=open('quiz_results.txt', 'rb'))
 
-# Start app
+@client.on(events.NewMessage(pattern='/start'))
+async def start(event):
+    await event.reply("Userbot is active and working!")
+
+# Main runner
 async def main():
     from threading import Thread
     def run_flask():
