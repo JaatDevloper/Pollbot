@@ -5,8 +5,8 @@ import asyncio
 from flask import Flask
 
 # Define your API credentials
-api_id = 27488818  # Replace with your API ID
-api_hash = '321fb972c3c3aee2dbdca1deeab39050'  # Replace with your API Hash
+api_id = 27488818
+api_hash = '321fb972c3c3aee2dbdca1deeab39050'
 
 # Load string session from the string_session.txt file
 if os.path.exists("string_session.txt"):
@@ -26,13 +26,16 @@ app = Flask(__name__)
 def health_check():
     return "OK", 200
 
+# User state
 user_states = {}
 
 @client.on(events.NewMessage(pattern='/extract'))
-async def start_extract(event):
+async def extract_start(event):
     user_id = event.sender_id
-    user_states[user_id] = {'step': 'first'}
-    await event.reply("Please send me the Link to the first message (containing the first poll or any message before the polls)\nExample: https://t.me/channel/123")
+    user_states[user_id] = {"step": "awaiting_first_url"}
+    await event.reply(
+        "Please send me the Link to the first message (containing the first poll or any message before the polls)\nExample: https://t.me/channel/123"
+    )
 
 @client.on(events.NewMessage)
 async def handle_links(event):
@@ -40,73 +43,72 @@ async def handle_links(event):
     if user_id not in user_states:
         return
 
-    text = event.raw_text.strip()
-    if not text.startswith("https://t.me/"):
-        return
-
     state = user_states[user_id]
+    text = event.raw_text.strip()
 
-    if state['step'] == 'first':
-        state['first_url'] = text
-        state['step'] = 'last'
+    # Get current step
+    if state["step"] == "awaiting_first_url":
+        state["first_url"] = text
+        state["step"] = "awaiting_last_url"
         await event.reply("Got it! Now, please send me the link to the last message after the poll.")
-    elif state['step'] == 'last':
-        state['last_url'] = text
+    elif state["step"] == "awaiting_last_url":
+        state["last_url"] = text
+        state["step"] = "processing"
         await event.reply("Processing, please wait...")
+
         try:
-            first_parts = state['first_url'].split('/')
-            last_parts = state['last_url'].split('/')
+            first_parts = state["first_url"].split('/')
+            last_parts = state["last_url"].split('/')
 
             if len(first_parts) < 5 or len(last_parts) < 5:
-                await event.reply("Invalid links. Please send full message links.")
-                return
+                raise ValueError("Invalid URL format")
 
-            channel_username = first_parts[3]
+            chat = first_parts[3]
             first_msg_id = int(first_parts[4])
             last_msg_id = int(last_parts[4])
 
-            channel = await client.get_entity(channel_username)
+            entity = await client.get_entity(chat)
 
             polls = []
+            total = last_msg_id - first_msg_id + 1
             count = 0
-            async for message in client.iter_messages(channel, min_id=first_msg_id, max_id=last_msg_id):
-                poll_obj = None
-                if message.poll:
-                    poll_obj = message.poll
-                elif message.media and hasattr(message.media, 'poll'):
+
+            async for message in client.iter_messages(entity, min_id=first_msg_id - 1, max_id=last_msg_id + 1):
+                count += 1
+
+                poll_obj = getattr(message, 'poll', None)
+                if not poll_obj and message.media and hasattr(message.media, 'poll'):
                     poll_obj = message.media.poll
 
-                if poll_obj:
+                if poll_obj and hasattr(poll_obj, 'question') and hasattr(poll_obj, 'answers'):
                     q = poll_obj.question
                     a_list = [a.text for a in poll_obj.answers]
-                    correct = next((a.text for a in poll_obj.answers if a.is_correct), None)
+                    correct = next((a.text for a in poll_obj.answers if getattr(a, 'correct', False) or getattr(a, 'is_correct', False)), None)
                     polls.append((q, a_list, correct))
 
-                count += 1
                 if count % 10 == 0:
-                    await event.reply(f"Checked {count} messages... Found {len(polls)} valid polls so far.")
+                    await event.reply(f"Checked {count}/{total} messages... Found {len(polls)} valid polls.")
 
             if not polls:
-                await event.reply("No valid polls found between these messages.")
-                return
+                await event.reply("No valid polls found between the provided messages.")
+            else:
+                text_result = ""
+                for i, (q, options, correct) in enumerate(polls, 1):
+                    text_result += f"Q{i}. {q}\n"
+                    for opt in options:
+                        prefix = "✅" if opt == correct else "⬜"
+                        text_result += f"  {prefix} {opt}\n"
+                    text_result += "\n"
 
-            txt = ""
-            for i, (q, a_list, correct) in enumerate(polls, 1):
-                txt += f"Q{i}. {q}\n"
-                for a in a_list:
-                    mark = "✅" if a == correct else "⬜"
-                    txt += f"  {mark} {a}\n"
-                txt += "\n"
+                with open("poll_results.txt", "w", encoding='utf-8') as f:
+                    f.write(text_result)
 
-            with open("poll_output.txt", "w", encoding="utf-8") as f:
-                f.write(txt)
-
-            await event.reply(file="poll_output.txt")
+                await event.reply(file="poll_results.txt")
 
         except Exception as e:
             await event.reply(f"Error while extracting polls: {e}")
-        finally:
-            user_states.pop(user_id, None)
+
+        user_states.pop(user_id)
 
 @client.on(events.NewMessage(pattern='/start'))
 async def start(event):
