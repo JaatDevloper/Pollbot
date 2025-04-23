@@ -5,157 +5,112 @@ from telethon import TelegramClient, events
 from telethon.sessions import StringSession
 from flask import Flask
 
-# Define your API credentials
-api_id = 27488818  # Replace with your API ID
-api_hash = '321fb972c3c3aee2dbdca1deeab39050'  # Replace with your API Hash
+api_id = 27488818
+api_hash = '321fb972c3c3aee2dbdca1deeab39050'
 
-# Load string session from the string_session.txt file
 if os.path.exists("string_session.txt"):
     with open("string_session.txt", "r") as f:
         string_session = f.read().strip()
 else:
-    raise ValueError("string_session.txt not found or empty! Please create it and paste your string session inside.")
+    raise ValueError("string_session.txt not found or empty!")
 
-if not string_session:
-    raise ValueError("String session is empty!")
-
-# Initialize the TelegramClient using StringSession
 client = TelegramClient(StringSession(string_session), api_id, api_hash)
 
-# Initialize Flask to serve the health check endpoint
 app = Flask(__name__)
 
 @app.route("/health")
 def health_check():
-    return "OK", 200  # Simple health check response
+    return "OK", 200
 
-# Global variables to store the URLs and state tracking
-first_poll_url = None
-last_poll_url = None
-user_state = {}  # To track the user state for each person
+# Store user-specific states and URLs
+user_sessions = {}
 
-# Function to extract channel name and message ID from the URL
-def extract_channel_and_message_id(url):
+def extract_info(url):
     match = re.match(r'https://t.me/([^/]+)/(\d+)', url)
     if match:
-        channel_name = match.group(1)  # Extracts channel name (e.g., 'RPSC_POLL_GK_QUESTION')
-        message_id = int(match.group(2))  # Extracts message ID (e.g., 10625)
-        return channel_name, message_id
+        return match.group(1), int(match.group(2))
     else:
-        raise ValueError("Invalid URL format. Please provide a valid t.me URL.")
+        raise ValueError("Invalid URL")
 
-# Handle the /extract command to start the poll extraction process
 @client.on(events.NewMessage(pattern='/extract'))
-async def start_extract(event):
+async def extract_command(event):
     user_id = event.sender_id
-    user_state[user_id] = "waiting_for_first_url"  # Set user state to wait for the first URL
+    user_sessions[user_id] = {'step': 'awaiting_first'}
     await event.reply("Please send me the Link to the first message (containing the first poll or any message before the polls)\nExample: https://t.me/channel/123")
 
-# Handle the first URL
 @client.on(events.NewMessage)
-async def handle_first_url(event):
+async def handle_links(event):
     user_id = event.sender_id
-    if user_id in user_state and user_state[user_id] == "waiting_for_first_url":
-        global first_poll_url
-        first_poll_url = event.text
-        user_state[user_id] = "waiting_for_last_url"  # Update user state to wait for the last URL
-        await event.reply("Got it! Now, please send me the link to the last message after the poll.")
+    text = event.raw_text.strip()
 
-# Handle the last URL
-@client.on(events.NewMessage)
-async def handle_last_url(event):
-    user_id = event.sender_id
-    if user_id in user_state and user_state[user_id] == "waiting_for_last_url":
-        global last_poll_url
-        last_poll_url = event.text
-        user_state[user_id] = "processing"  # Update user state to indicate processing is in progress
+    if user_id not in user_sessions:
+        return  # Ignore messages from users who haven't initiated
+
+    session = user_sessions[user_id]
+
+    if session['step'] == 'awaiting_first' and text.startswith('https://t.me/'):
+        session['first_url'] = text
+        session['step'] = 'awaiting_last'
+        await event.reply("Got it! Now, please send me the link to the last message after the poll.")
+        return
+
+    if session['step'] == 'awaiting_last' and text.startswith('https://t.me/'):
+        session['last_url'] = text
+        session['step'] = 'processing'
         await event.reply("Processing, please wait...")
 
         try:
-            # Extract channel name and message ID from the first and last URLs
-            first_channel_name, first_message_id = extract_channel_and_message_id(first_poll_url)
-            last_channel_name, last_message_id = extract_channel_and_message_id(last_poll_url)
+            first_channel, first_msg_id = extract_info(session['first_url'])
+            last_channel, last_msg_id = extract_info(session['last_url'])
 
-            if first_channel_name != last_channel_name:
-                await event.reply("Error: The channels in the first and last URLs must be the same!")
+            if first_channel != last_channel:
+                await event.reply("Error: First and last links must be from the same channel.")
+                user_sessions.pop(user_id)
                 return
 
-            # Get the channel entity using the extracted name
-            channel = await client.get_entity(first_channel_name)
+            channel = await client.get_entity(first_channel)
+            polls = []
+            total = last_msg_id - first_msg_id + 1
+            count = 0
 
-            valid_polls = []
-            progress = 0
-            total_messages = last_message_id - first_message_id + 1
-
-            # Loop through messages between the first and last message IDs
-            async for message in client.iter_messages(channel, min_id=first_message_id, max_id=last_message_id):
+            async for message in client.iter_messages(channel, min_id=first_msg_id, max_id=last_msg_id):
                 if message.poll:
-                    question = message.poll.question
-                    answers = [answer.text for answer in message.poll.answers]
-                    correct_answer = None
+                    q = message.poll.question
+                    a_list = [a.text for a in message.poll.answers]
+                    correct = next((a.text for a in message.poll.answers if a.is_correct), None)
+                    polls.append((q, a_list, correct))
+                count += 1
 
-                    # Identify the correct answer (e.g., check for an option marked as correct)
-                    for answer in message.poll.answers:
-                        if answer.is_correct:
-                            correct_answer = answer.text
-                            break
-
-                    # Add to valid polls list
-                    valid_polls.append((question, answers, correct_answer))
-
-                progress += 1
-                # Show progress
-                await event.reply(f"Processing message: {progress}/{total_messages} ({(progress / total_messages) * 100:.1f}%)\nFound {len(valid_polls)} valid polls so far...")
-
-            # Generate and send the .txt file with the results
-            await generate_txt(valid_polls, event)
-
+            await generate_txt(polls, event)
         except Exception as e:
-            # Handle any exceptions that occur during poll extraction
             await event.reply(f"Error while extracting polls: {str(e)}")
-
         finally:
-            # Reset URLs and user state after the process
-            first_poll_url = None
-            last_poll_url = None
-            user_state[user_id] = "done"  # Mark the process as done for this user
+            user_sessions.pop(user_id)
 
-# Function to generate the .txt file with poll results
-async def generate_txt(valid_polls, event):
-    # Create the content for the .txt file
-    text = ""
-    for idx, (question, answers, correct_answer) in enumerate(valid_polls, 1):
-        text += f"Q{idx}. {question}\n"
-        for ans in answers:
-            if ans == correct_answer:
-                text += f"  ✅ {ans}\n"
-            else:
-                text += f"  ⬜ {ans}\n"
-        text += "\n"
+async def generate_txt(polls, event):
+    content = ""
+    for i, (q, a_list, correct) in enumerate(polls, 1):
+        content += f"Q{i}. {q}\n"
+        for a in a_list:
+            prefix = "✅" if a == correct else "⬜"
+            content += f"  {prefix} {a}\n"
+        content += "\n"
 
-    # Save the results to a text file
-    with open('quiz_results.txt', 'w', encoding='utf-8') as file:
-        file.write(text)
+    with open("quiz_results.txt", "w", encoding="utf-8") as f:
+        f.write(content)
 
-    # Send the .txt file back to the user
-    await event.reply(file=open('quiz_results.txt', 'rb'))
+    await event.reply(file=open("quiz_results.txt", "rb"))
 
-# Example command to confirm the bot is working
 @client.on(events.NewMessage(pattern='/start'))
 async def start(event):
     await event.reply("Userbot is active and working!")
 
-# Running the client
 async def main():
-    # Start Flask in a separate thread to handle health checks
     from threading import Thread
     def run_flask():
         app.run(host="0.0.0.0", port=8080)
 
-    flask_thread = Thread(target=run_flask)
-    flask_thread.start()
-
-    # Start the Telegram client
+    Thread(target=run_flask).start()
     await client.start()
     print("Client started successfully.")
     await client.run_until_disconnected()
