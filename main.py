@@ -29,9 +29,10 @@ app = Flask(__name__)
 def health_check():
     return "OK", 200  # Simple health check response
 
-# Global variables to store the URLs
+# Global variables to store the URLs and state tracking
 first_poll_url = None
 last_poll_url = None
+user_state = {}  # To track the user state for each person
 
 # Function to extract channel name and message ID from the URL
 def extract_channel_and_message_id(url):
@@ -46,22 +47,28 @@ def extract_channel_and_message_id(url):
 # Handle the /extract command to start the poll extraction process
 @client.on(events.NewMessage(pattern='/extract'))
 async def start_extract(event):
+    user_id = event.sender_id
+    user_state[user_id] = "waiting_for_first_url"  # Set user state to wait for the first URL
     await event.reply("Please send me the Link to the first message (containing the first poll or any message before the polls)\nExample: https://t.me/channel/123")
 
 # Handle the first URL
 @client.on(events.NewMessage)
 async def handle_first_url(event):
-    global first_poll_url
-    if first_poll_url is None:  # Only process the first URL once
+    user_id = event.sender_id
+    if user_id in user_state and user_state[user_id] == "waiting_for_first_url":
+        global first_poll_url
         first_poll_url = event.text
+        user_state[user_id] = "waiting_for_last_url"  # Update user state to wait for the last URL
         await event.reply("Got it! Now, please send me the link to the last message after the poll.")
 
 # Handle the last URL
 @client.on(events.NewMessage)
 async def handle_last_url(event):
-    global last_poll_url
-    if first_poll_url and last_poll_url is None:  # Only process the last URL once
+    user_id = event.sender_id
+    if user_id in user_state and user_state[user_id] == "waiting_for_last_url":
+        global last_poll_url
         last_poll_url = event.text
+        user_state[user_id] = "processing"  # Update user state to indicate processing is in progress
         await event.reply("Processing, please wait...")
 
         try:
@@ -108,9 +115,10 @@ async def handle_last_url(event):
             await event.reply(f"Error while extracting polls: {str(e)}")
 
         finally:
-            # Reset URLs after the process
+            # Reset URLs and user state after the process
             first_poll_url = None
             last_poll_url = None
+            user_state[user_id] = "done"  # Mark the process as done for this user
 
 # Function to generate the .txt file with poll results
 async def generate_txt(valid_polls, event):
