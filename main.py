@@ -4,9 +4,9 @@ from telethon import TelegramClient, events
 from urllib.parse import urlparse
 
 # Environment variables or replace with your actual values
-api_id = int(os.getenv("API_ID"))
-api_hash = os.getenv("API_HASH")
-session = os.getenv("SESSION")
+api_id = int(os.getenv("27488818"))
+api_hash = os.getenv("321fb972c3c3aee2dbdca1deeab39050")
+session = os.getenv("1BVtsOKEBu1n1e48GEEoqRlPzUUy1CloJ4rwmCDOAfcyXvjPKoxgDTLfoypsaQxMKqqcXRTZ7Z7gACuECJuX8GnpAtiVMNTRQKMphB7j-Un7nILgKZ_EfYd1uwBMXN3WU1rPHsenQRxuhWsXcIx9T7hU2hF_za2l2saJhsj5N5WuvfazFBdX01sXV3y6PbCCYW4eSxBFhrcqR7cHoAoJWNlphdk7jygTHlltDbAt2aJzBKn_JBJgStE08OG5sFjkYQvnrMEJV7dpFjwPzW3akWHWGdFqdwNqDEz4yn6gnWP3wDZRsWOMy8r9FCmFpcx5V28g3d8L07XdkWtSHgDYoN9aK9kU1a9A=")
 
 client = TelegramClient("userbot", api_id, api_hash, session=session)
 
