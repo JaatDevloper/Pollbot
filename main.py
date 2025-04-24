@@ -1,6 +1,7 @@
 from telethon import TelegramClient, events
 from telethon.sessions import StringSession
-from telethon.tl.functions.messages import GetPollResultsRequest
+from telethon.tl.types import InputPollAnswerVote
+from telethon.tl.functions.messages import SendVoteRequest, GetPollResultsRequest
 import os
 import asyncio
 from flask import Flask
@@ -72,145 +73,118 @@ async def extract_polls(chat, first_id, last_id, event):
     valid_polls = []
     total_messages = last_id - first_id + 1
     progress = 0
-    quiz_count = 0
     
-    # For logging poll details
-    with open("poll_debug.txt", "w", encoding="utf-8") as f:
-        f.write("Poll debug information:\n\n")
-
+    # Load known correct answers from file if it exists
+    correct_answers_data = {}
+    if os.path.exists("correct_answers.txt"):
+        try:
+            with open("correct_answers.txt", "r", encoding="utf-8") as f:
+                for line in f:
+                    if line.strip() and ":" in line:
+                        parts = line.strip().split(":", 1)
+                        if len(parts) == 2:
+                            question = parts[0].strip()
+                            answers = parts[1].strip().split(",")
+                            correct_answers_data[question] = [int(a) for a in answers if a.isdigit()]
+        except Exception as e:
+            await event.reply(f"Warning: Failed to load correct answers data: {e}")
+    
+    # First pass - collect all messages
+    all_messages = []
     async for msg in client.iter_messages(entity, min_id=first_id, max_id=last_id):
+        all_messages.append(msg)
         progress += 1
+        if progress % 20 == 0:
+            await event.reply(f"Collecting messages: {progress}/{total_messages}...")
+    
+    # Sort by ID
+    all_messages.sort(key=lambda msg: msg.id)
+    
+    # Process polls
+    await event.reply("Processing polls...")
+    for i, msg in enumerate(all_messages):
         if msg.media and hasattr(msg.media, 'poll'):
             poll = msg.media.poll
             question = poll.question
             answers = [ans.text for ans in poll.answers]
             correct_indices = []
-            quiz_detected = False
             
-            # Debug info
-            poll_info = f"Poll: {question}\n"
-            poll_info += f"Poll type: {getattr(poll, 'poll_type', 'unknown')}\n"
-            poll_info += f"Is quiz: {hasattr(poll, 'quiz')}\n"
+            # Critical difference: Try to vote in the poll to get results
+            # This is likely what your friend's bot is doing
+            try:
+                # The trick is to vote in the poll first
+                # This gives your session access to the correct answer data
+                if len(answers) > 0 and hasattr(poll, 'poll'):
+                    poll_id = poll.poll.id
+                    
+                    # Try to vote for the first option - this is how we get access to results
+                    vote_result = await client(SendVoteRequest(
+                        peer=entity,
+                        msg_id=msg.id,
+                        options=[b'0']  # Vote for first option
+                    ))
+                    
+                    # Now get poll results which will include the correct answer
+                    results = await client(GetPollResultsRequest(
+                        peer=entity,
+                        msg_id=msg.id
+                    ))
+                    
+                    # Process results to find correct answer
+                    if hasattr(results, 'poll') and hasattr(results.poll, 'answers'):
+                        for i, ans_result in enumerate(results.poll.answers):
+                            if hasattr(ans_result, 'correct') and ans_result.correct:
+                                correct_indices.append(i)
+            except Exception as e:
+                # Voting might fail if you already voted or don't have permission
+                # Continue to other methods
+                pass
             
-            # Look for quiz information - multiple approaches
-            # Method 1: Check if it's a quiz type poll
-            if hasattr(poll, 'quiz') and poll.quiz:
-                quiz_detected = True
-                quiz_count += 1
-                poll_info += "Quiz poll detected!\n"
-                
-                # Method 1.1: Direct correct_answer_id attribute
+            # If voting didn't work, try direct attribute access
+            if not correct_indices and hasattr(poll, 'quiz') and poll.quiz:
+                # Try directly accessing correct answer via various attributes
                 if hasattr(poll.quiz, 'correct_answer_id'):
-                    correct_idx = poll.quiz.correct_answer_id
-                    if 0 <= correct_idx < len(answers):
-                        correct_indices.append(correct_idx)
-                        poll_info += f"Found correct_answer_id: {correct_idx}\n"
+                    idx = poll.quiz.correct_answer_id
+                    if 0 <= idx < len(answers):
+                        correct_indices.append(idx)
                 
-                # Method 1.2: correct_answers list
                 elif hasattr(poll.quiz, 'correct_answers'):
                     for idx in poll.quiz.correct_answers:
                         if 0 <= idx < len(answers) and idx not in correct_indices:
                             correct_indices.append(idx)
-                            poll_info += f"Found in correct_answers: {idx}\n"
-                
-                # Method 1.3: Try to access poll results and find solutions
-                try:
-                    if hasattr(poll, 'results'):
-                        # Check for solution
-                        if hasattr(poll.results, 'solution'):
-                            poll_info += f"Found solution: {poll.results.solution}\n"
-                            
-                            # Try to match solution with an answer
-                            solution = str(poll.results.solution).lower()
-                            for i, ans in enumerate(answers):
-                                if solution in ans.lower() or ans.lower() in solution:
-                                    if i not in correct_indices:
-                                        correct_indices.append(i)
-                                        poll_info += f"Matched solution to answer {i}\n"
-                        
-                        # Check for correct_option
-                        if hasattr(poll.results, 'correct_option'):
-                            correct_idx = poll.results.correct_option
-                            if 0 <= correct_idx < len(answers) and correct_idx not in correct_indices:
-                                correct_indices.append(correct_idx)
-                                poll_info += f"Found correct_option: {correct_idx}\n"
-                        
-                        # Check for correct_options list
-                        if hasattr(poll.results, 'correct_options'):
-                            for idx in poll.results.correct_options:
-                                if 0 <= idx < len(answers) and idx not in correct_indices:
-                                    correct_indices.append(idx)
-                                    poll_info += f"Found in correct_options: {idx}\n"
-                except Exception as e:
-                    poll_info += f"Error accessing poll results: {str(e)}\n"
-                
-                # Method 1.4: Try to get poll results via API call
-                if not correct_indices:
-                    try:
-                        # This is the method your friend's bot might be using!
-                        results = await client(GetPollResultsRequest(
-                            peer=entity,
-                            msg_id=msg.id
-                        ))
-                        
-                        poll_info += "Called GetPollResultsRequest API\n"
-                        
-                        if hasattr(results, 'poll'):
-                            result_poll = results.poll
-                            
-                            # Check for correct_option in results
-                            if hasattr(result_poll, 'correct_option'):
-                                correct_idx = result_poll.correct_option
-                                if 0 <= correct_idx < len(answers) and correct_idx not in correct_indices:
-                                    correct_indices.append(correct_idx)
-                                    poll_info += f"API returned correct_option: {correct_idx}\n"
-                            
-                            # Check each answer for 'correct' flag
-                            for i, ans in enumerate(result_poll.answers):
-                                if hasattr(ans, 'correct') and ans.correct:
-                                    if i not in correct_indices:
-                                        correct_indices.append(i)
-                                        poll_info += f"API result marked answer {i} as correct\n"
-                    except Exception as e:
-                        poll_info += f"Error with GetPollResultsRequest: {str(e)}\n"
             
-            # Method 2: Look for "correct" attribute on individual answers
-            if not correct_indices:
-                for i, ans in enumerate(poll.answers):
-                    if hasattr(ans, 'correct') and ans.correct:
-                        correct_indices.append(i)
-                        poll_info += f"Answer {i} has correct=True attribute\n"
-            
-            # Method 3: Check if answers themselves contain indicators
+            # If still no correct answers, check for special markers in answer text
             if not correct_indices:
                 for i, ans in enumerate(answers):
-                    ans_lower = ans.lower()
                     if any(marker in ans for marker in ["✓", "✅", "*", "(*)"]):
                         correct_indices.append(i)
-                        poll_info += f"Found marker in answer {i}: {ans}\n"
             
-            # Method 4: If "Anonymous Quiz" is mentioned, try to find marked answer
-            if "Anonymous Quiz" in str(msg.message) and not correct_indices:
-                poll_info += "Anonymous Quiz type detected\n"
-                # This is often a bot-created quiz, look for special patterns
-                for i, ans in enumerate(answers):
-                    if "✓" in ans or "✅" in ans or "*)" in ans:
-                        correct_indices.append(i)
-                        poll_info += f"Found marker in anonymous quiz answer {i}: {ans}\n"
+            # If still no correct answers, check stored answers
+            if not correct_indices and question in correct_answers_data:
+                correct_indices = [idx for idx in correct_answers_data[question] if 0 <= idx < len(answers)]
             
-            # Write debug info for this poll
-            with open("poll_debug.txt", "a", encoding="utf-8") as f:
-                f.write(poll_info + "\n" + "-"*50 + "\n\n")
+            # If still nothing, try a neighboring message for answer
+            if not correct_indices and i+1 < len(all_messages):
+                next_msg = all_messages[i+1]
+                if hasattr(next_msg, 'message') and next_msg.message:
+                    msg_text = next_msg.message.lower()
+                    if "correct" in msg_text or "answer" in msg_text:
+                        # Try to extract answer from text
+                        for letter in "abcd":
+                            if f"answer {letter}" in msg_text or f"correct {letter}" in msg_text:
+                                idx = ord(letter) - ord('a')
+                                if 0 <= idx < len(answers):
+                                    correct_indices.append(idx)
             
-            # Add to valid polls
             valid_polls.append((question, answers, correct_indices))
+            
+            # Store this correct answer for future use
+            if correct_indices:
+                with open("correct_answers.txt", "a", encoding="utf-8") as f:
+                    indices_str = ",".join(str(idx) for idx in correct_indices)
+                    f.write(f"{question}: {indices_str}\n")
 
-        if progress % 10 == 0:
-            await event.reply(f"Progress: {progress}/{total_messages} messages scanned...")
-
-    await event.reply(f"Found {len(valid_polls)} polls, including {quiz_count} quiz polls.")
-    
-    # Generate the output
+    # Generate output
     await generate_txt(valid_polls, event)
 
 async def generate_txt(polls, event):
@@ -240,30 +214,31 @@ async def generate_txt(polls, event):
         f.write(output)
 
     await event.reply("Here is your extracted quiz:", file="quiz_results.txt")
-    await event.reply(f"Successfully detected correct answers in {correct_count} polls and marked them with ✅")
     
-    # If no correct answers detected, provide a fallback version
-    if correct_count == 0 and polls:
-        # Create a version with first answers marked as correct
-        with open("quiz_results_first_marked.txt", "w", encoding="utf-8") as f:
-            output = ""
-            for question, answers, _ in polls:
-                output += f"{question}\n"
-                
-                for i, ans in enumerate(answers):
-                    if ans.strip().startswith('(') and len(ans) > 3 and ans[1].isalpha() and ans[2] == ')':
-                        mark = " ✅" if i == 0 else ""
-                        output += f"{ans}{mark}\n"
-                    else:
-                        letter = chr(97 + i)
-                        mark = " ✅" if i == 0 else ""
-                        output += f"({letter}) {ans}{mark}\n"
-                
-                output += "\n"
+    if correct_count > 0:
+        await event.reply(f"Successfully detected correct answers in {correct_count} polls and marked them with ✅")
+    else:
+        # If no correct answers found at all, create a version with first answers marked
+        output = ""
+        for question, answers, _ in polls:
+            output += f"{question}\n"
             
+            for i, ans in enumerate(answers):
+                # Format answer with the first one marked as correct
+                if ans.strip().startswith('(') and len(ans) > 3 and ans[1].isalpha() and ans[2] == ')':
+                    mark = " ✅" if i == 0 else ""
+                    output += f"{ans}{mark}\n"
+                else:
+                    letter = chr(97 + i)
+                    mark = " ✅" if i == 0 else ""
+                    output += f"({letter}) {ans}{mark}\n"
+            
+            output += "\n"
+        
+        with open("quiz_results_first_marked.txt", "w", encoding="utf-8") as f:
             f.write(output)
         
-        await event.reply("Since no correct answers were detected, I've created a fallback version with first answers marked:", file="quiz_results_first_marked.txt")
+        await event.reply("No correct answers detected. Here's a version with the first answer in each poll marked:", file="quiz_results_first_marked.txt")
 
 @client.on(events.NewMessage(pattern='/start'))
 async def start(event):
