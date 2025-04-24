@@ -1,252 +1,160 @@
 import asyncio
 import logging
 import os
-from telegram import Bot, Update
-from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
-from flask import Flask
 import json
-import uuid
+import string
+import random
+from telegram import Bot, Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes, CallbackQueryHandler
+from flask import Flask
+from threading import Thread
 
-# Set up Flask for the health check
+# Flask app for health checks
 app = Flask(__name__)
-
 @app.route("/health")
 def health_check():
     return "OK", 200
 
-# Configure logging
-logging.basicConfig(
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    level=logging.INFO
-)
+# Logging
+logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Bot token (hardcoded)
-BOT_TOKEN = "7443584461:AAFyeaZs4YIujxe5bWu9sGzMEHgTAUd8kDs"
+# Bot token
+BOT_TOKEN = os.getenv("BOT_TOKEN", "YOUR_BOT_TOKEN")
 
-# Store user states
+# Databases
+QUIZ_DB = {}
+if os.path.exists("quizzes.json"):
+    with open("quizzes.json", "r", encoding="utf-8") as f:
+        QUIZ_DB = json.load(f)
+
 user_states = {}
 
-# Store known correct answers in a database
-CORRECT_ANSWERS_DB = {}
-if os.path.exists("answer_database.json"):
-    try:
-        with open("answer_database.json", "r", encoding="utf-8") as f:
-            CORRECT_ANSWERS_DB = json.load(f)
-    except Exception as e:
-        logger.error(f"Error loading answer database: {e}")
+# Helper to save DB
+async def save_quizzes():
+    with open("quizzes.json", "w", encoding="utf-8") as f:
+        json.dump(QUIZ_DB, f, ensure_ascii=False, indent=2)
 
-# Store saved polls with Quiz IDs
-SAVED_POLLS_DB = {}
+# Generate unique Quiz ID
+def generate_quiz_id():
+    return ''.join(random.choices(string.digits, k=5))
 
-async def save_correct_answers():
-    try:
-        with open("answer_database.json", "w", encoding="utf-8") as f:
-            json.dump(CORRECT_ANSWERS_DB, f, ensure_ascii=False, indent=2)
-    except Exception as e:
-        logger.error(f"Error saving answer database: {e}")
-
+# /start
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(
-        "👋 Hello! I'm a Poll Extractor Bot.\n\n"
-        "I can extract polls from Telegram channels and mark the correct answers.\n\n"
-        "Use /extract to start the extraction process."
-    )
+    await update.message.reply_text("Welcome! Use /quiz to save polls as a quiz or /play <id> to play a quiz.")
 
-async def extract_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+# /quiz start
+async def quiz_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     user_states[user_id] = {"step": "awaiting_first"}
-    await update.message.reply_text(
-        "Please send me the link to the first message (containing the first poll or any message before the polls)\n"
-        "Example: https://t.me/channel/123"
-    )
+    await update.message.reply_text("Send me the FIRST poll message URL:")
 
-async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
-
-    # ✅ Detect forwarded quiz poll and extract correct answer
-    if update.message.forward_from_chat and update.message.text:
-        lines = update.message.text.split('\n')
-        question = lines[0].strip()
-        options = []
-        correct_indices = []
-
-        for i, line in enumerate(lines[1:]):
-            option = line.strip()
-            if '✅' in option:
-                correct_indices.append(i)
-                option = option.replace('✅', '').strip()
-            options.append(option)
-
-        polls = [(question, options, correct_indices)]
-        await generate_txt(polls, update, context)
+# /play command
+async def play_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    args = context.args
+    if not args:
+        await update.message.reply_text("Usage: /play <quiz_id>")
+        return
+    quiz_id = args[0]
+    if quiz_id not in QUIZ_DB:
+        await update.message.reply_text("Quiz ID not found.")
         return
 
-    # Normal extract flow
+    polls = QUIZ_DB[quiz_id]
+    for poll in polls:
+        question = poll['question']
+        options = poll['options']
+        correct_id = poll['correct']
+
+        await update.message.bot.send_poll(
+            chat_id=update.effective_chat.id,
+            question=question,
+            options=options,
+            type='quiz',
+            correct_option_id=correct_id,
+            is_anonymous=False
+        )
+        await asyncio.sleep(1)
+
+# Handle messages
+async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    text = update.message.text
+
     if user_id not in user_states:
         return
 
     state = user_states[user_id]
 
-    if state["step"] == "awaiting_first" and "https://t.me/" in update.message.text:
-        user_states[user_id]["first_url"] = update.message.text.strip()
-        user_states[user_id]["step"] = "awaiting_last"
-        await update.message.reply_text("Got it! Now, please send me the link to the last message after the polls.")
+    if state["step"] == "awaiting_first" and "https://t.me/" in text:
+        state["first_url"] = text.strip()
+        state["step"] = "awaiting_last"
+        await update.message.reply_text("Now send me the LAST poll message URL:")
 
-    elif state["step"] == "awaiting_last" and "https://t.me/" in update.message.text:
-        user_states[user_id]["last_url"] = update.message.text.strip()
-        await update.message.reply_text("Processing, please wait...")
+    elif state["step"] == "awaiting_last" and "https://t.me/" in text:
+        state["last_url"] = text.strip()
+        await update.message.reply_text("Saving polls and creating quiz, please wait...")
 
         try:
-            first_url = user_states[user_id]["first_url"]
-            last_url = user_states[user_id]["last_url"]
+            first_url = state["first_url"]
+            last_url = state["last_url"]
 
             parts1 = first_url.split('/')
             parts2 = last_url.split('/')
-
-            if len(parts1) < 5 or len(parts2) < 5:
-                raise ValueError("Invalid URLs")
-
             chat = parts1[3]
             first_id = int(parts1[4])
             last_id = int(parts2[4])
+            chat_id = f"@{chat}" if not chat.startswith('-100') else chat
 
-            await extract_polls(context.bot, chat, first_id, last_id, update, context)
-
-        except Exception as e:
-            logger.error(f"Error processing: {e}", exc_info=True)
-            await update.message.reply_text(f"Error while processing: {e}")
-
-        del user_states[user_id]
-
-async def extract_polls(bot: Bot, chat: str, first_id: int, last_id: int, update: Update, context: ContextTypes.DEFAULT_TYPE):
-    valid_polls = []
-
-    chat_id = chat
-    if not chat.startswith('@') and not chat.startswith('-100'):
-        chat_id = f'@{chat}'
-
-    await update.message.reply_text("Collecting messages...")
-
-    all_ids = list(range(first_id, last_id + 1))
-    poll_count = 0
-    progress_count = 0
-
-    for msg_id in all_ids:
-        progress_count += 1
-        try:
-            message = None
-            try:
-                message = await bot.get_chat_message(chat_id=chat_id, message_id=msg_id)
-            except Exception:
+            all_ids = list(range(first_id, last_id + 1))
+            collected_polls = []
+            for msg_id in all_ids:
                 try:
-                    temp_chat_id = update.effective_user.id
-                    forwarded = await bot.forward_message(
-                        chat_id=temp_chat_id,
+                    message = await context.bot.forward_message(
+                        chat_id=update.effective_user.id,
                         from_chat_id=chat_id,
                         message_id=msg_id
                     )
-                    message = forwarded
+                    if message.poll:
+                        poll = message.poll
+                        question = poll.question
+                        options = [o.text for o in poll.options]
+                        correct_id = poll.correct_option_id or 0
+                        collected_polls.append({
+                            "question": question,
+                            "options": options,
+                            "correct": correct_id
+                        })
                 except Exception as e:
-                    logger.warning(f"Couldn't access message {msg_id}: {e}")
+                    logger.warning(f"Could not fetch message {msg_id}: {e}")
                     continue
 
-            if hasattr(message, 'poll') and message.poll:
-                poll = message.poll
-                question = poll.question
-                answers = [option.text for option in poll.options]
-                correct_indices = []
-
-                if hasattr(poll, 'type') and poll.type == 'quiz':
-                    if hasattr(poll, 'correct_option_id') and poll.correct_option_id is not None:
-                        correct_indices.append(poll.correct_option_id)
-
-                if correct_indices:
-                    CORRECT_ANSWERS_DB[question] = correct_indices
-                elif question in CORRECT_ANSWERS_DB:
-                    correct_indices = CORRECT_ANSWERS_DB[question]
-
-                valid_polls.append((question, answers, correct_indices))
-                poll_count += 1
-
-                # Assign a unique Quiz ID and save it
-                quiz_id = str(uuid.uuid4())  # Unique ID for the poll
-                SAVED_POLLS_DB[quiz_id] = {
-                    "question": question,
-                    "answers": answers,
-                    "correct_answers": correct_indices
-                }
-                logger.info(f"Saved poll with Quiz ID: {quiz_id}")
-
-            if progress_count % 10 == 0:
-                await update.message.reply_text(f"Processed {progress_count}/{len(all_ids)} messages, found {poll_count} polls...")
-
-        except Exception as e:
-            logger.warning(f"Error processing message {msg_id}: {e}")
-            continue
-
-    await save_correct_answers()
-    await update.message.reply_text(f"Found {poll_count} polls. Generating output...")
-    await generate_txt(valid_polls, update, context)
-
-async def generate_txt(polls, update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not polls:
-        await update.message.reply_text("No polls found to generate output.")
-        return
-
-    output = ""
-    correct_count = 0
-
-    for question, answers, correct_indices in polls:
-        output += f"{question}\n"
-
-        for i, ans in enumerate(answers):
-            if ans.strip().startswith('(') and len(ans) > 3 and ans[1].isalpha() and ans[2] == ')':
-                mark = " ✅" if i in correct_indices else ""
-                output += f"{ans}{mark}\n"
+            if collected_polls:
+                quiz_id = generate_quiz_id()
+                QUIZ_DB[quiz_id] = collected_polls
+                await save_quizzes()
+                await update.message.reply_text(f"Saved {len(collected_polls)} polls as quiz with ID {quiz_id}.")
             else:
-                letter = chr(97 + i)
-                mark = " ✅" if i in correct_indices else ""
-                output += f"({letter}) {ans}{mark}\n"
+                await update.message.reply_text("No polls were found in the given range.")
+        except Exception as e:
+            logger.error(f"Quiz creation error: {e}", exc_info=True)
+            await update.message.reply_text("Failed to process. Please check the links and try again.")
 
-        output += "\n"
+        del user_states[user_id]
 
-        if correct_indices:
-            correct_count += 1
-
-    with open("quiz_results.txt", "w", encoding="utf-8") as f:
-        f.write(output)
-
-    await update.message.reply_document(document=open("quiz_results.txt", "rb"))
-
-    if correct_count > 0:
-        await update.message.reply_text(f"Successfully marked {correct_count} polls with correct answers ✅")
-    else:
-        await update.message.reply_text("No correct answers were found in these polls.")
-
-async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    logger.error("Exception while handling an update:", exc_info=context.error)
-    if update and update.effective_message:
-        await update.effective_message.reply_text(
-            "Sorry, an error occurred while processing your request."
-        )
-
+# Main setup
 def main():
-    from threading import Thread
-    def run_flask():
-        app.run(host="0.0.0.0", port=8080)
-    Thread(target=run_flask).start()
+    Thread(target=lambda: app.run(host="0.0.0.0", port=8080)).start()
 
     application = Application.builder().token(BOT_TOKEN).build()
-
     application.add_handler(CommandHandler("start", start))
-    application.add_handler(CommandHandler("extract", extract_command))
+    application.add_handler(CommandHandler("quiz", quiz_command))
+    application.add_handler(CommandHandler("play", play_command))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, message_handler))
 
-    application.add_error_handler(error_handler)
-
-    logger.info("Starting bot")
+    logger.info("Bot is running...")
     application.run_polling()
 
-if __name__ == "__main__":
+if __name__ == '__main__':
     main()
+    
