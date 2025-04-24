@@ -90,9 +90,9 @@ async def main():
     # Start Telethon client
     await start_telethon()
 
-    # Start Flask app
+    # Start Flask app on port 8080
     from threading import Thread
-    flask_thread = Thread(target=lambda: app.run(host='0.0.0.0', port=5000, use_reloader=False))
+    flask_thread = Thread(target=lambda: app.run(host='0.0.0.0', port=8080, use_reloader=False))
     flask_thread.start()
 
 # Run everything inside an asyncio loop
