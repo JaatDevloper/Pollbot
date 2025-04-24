@@ -4,6 +4,7 @@ from flask import Flask, jsonify, request
 from telethon import TelegramClient
 from telethon.sessions import StringSession
 import asyncio
+from threading import Thread
 
 # Flask App Setup
 app = Flask(__name__)
@@ -47,7 +48,6 @@ def extract_polls():
         return jsonify(status="Error", message="User not authorized")
 
     # Your logic to extract polls between first_poll_link and last_poll_link here
-    # Example: Extract poll data (pseudo code)
     polls_data = []  # Assuming you have a function that fetches polls based on the links
 
     # After extracting polls, save them with unique IDs
@@ -68,30 +68,20 @@ def play_quiz(quiz_id):
     # Retrieve the quiz by ID
     if quiz_id in saved_polls:
         quiz_data = saved_polls[quiz_id]
-        # Logic to start the quiz (send questions one by one)
         return jsonify(status="OK", message="Quiz started", quiz_data=quiz_data)
     else:
         return jsonify(status="Error", message="Quiz ID not found")
 
-# Main entry point
-async def main():
-    await client.start()
-    print("Userbot is running...")
+# Main entry point to start the client and Flask server
+def start_telethon_and_flask():
+    # Start the Telethon client asynchronously
+    asyncio.run(client.start())
 
-    # Run any additional logic after starting the client (like sending messages or handling updates)
+    # Start the Flask server
+    app.run(host='0.0.0.0', port=5000)
 
-# Start the Flask server and Telethon client together
 if __name__ == '__main__':
-    # Start the Telethon client in a separate thread
-    from threading import Thread
-
-    def run_flask():
-        app.run(host='0.0.0.0', port=5000)
-
-    # Start Flask in a background thread
-    flask_thread = Thread(target=run_flask)
-    flask_thread.start()
-
-    # Run the Telethon client
-    asyncio.run(main())
+    # Start Telethon and Flask in parallel using threading
+    thread = Thread(target=start_telethon_and_flask)
+    thread.start()
     
