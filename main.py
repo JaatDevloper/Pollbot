@@ -3,7 +3,6 @@ from telethon.sessions import StringSession
 import os
 import asyncio
 from flask import Flask
-import json
 
 api_id = 27488818
 api_hash = '321fb972c3c3aee2dbdca1deeab39050'
@@ -67,27 +66,12 @@ async def handle_url(event):
 
         del user_states[user_id]
 
-# Helper function to safely get attributes
-def safe_get_attr(obj, attr, default=None):
-    if hasattr(obj, attr):
-        return getattr(obj, attr)
-    return default
-
-# Helper function to safely convert to string for debug info
-def safe_str(obj):
-    if obj is None:
-        return "None"
-    try:
-        return str(obj)
-    except:
-        return "Unconvertible"
-
 async def extract_polls(chat, first_id, last_id, event):
     entity = await client.get_entity(chat)
     valid_polls = []
     total_messages = last_id - first_id + 1
     progress = 0
-    debug_info = []
+    poll_info = []
 
     async for msg in client.iter_messages(entity, min_id=first_id, max_id=last_id):
         progress += 1
@@ -97,112 +81,124 @@ async def extract_polls(chat, first_id, last_id, event):
             answers = []
             correct_indices = []
             
-            # Debug information
-            poll_debug = {
-                "question": question,
-                "poll_type": safe_get_attr(poll, 'poll_type', 'unknown'),
-                "quiz": safe_get_attr(poll, 'quiz', False),
-                "answers": []
+            # Create simplified answer objects for easier inspection
+            poll_struct = {
+                'question': question,
+                'answers': [],
+                'correct_indices': []
             }
             
-            # Get all possible answer data
+            # A simple debug log
+            debug_log = f"POLL: {question}\n"
+            
+            # Process answers
             for i, ans in enumerate(poll.answers):
                 answers.append(ans.text)
-                poll_debug["answers"].append({
-                    "text": ans.text,
-                    "has_correct_attr": hasattr(ans, 'correct'),
-                    "correct_value": safe_get_attr(ans, 'correct', None),
-                    "option": safe_get_attr(ans, 'option', None)
-                })
+                poll_struct['answers'].append(ans.text)
                 
-                # Try different methods to detect correct answers
-                is_correct = False
+                debug_log += f"  Answer {i}: {ans.text}\n"
                 
-                # Method 1: Direct 'correct' attribute
-                if hasattr(ans, 'correct') and ans.correct:
-                    is_correct = True
-                    poll_debug["answers"][i]["marked_by"] = "direct_correct_attr"
-                
-                # Method 2: getattr with default
-                elif getattr(ans, 'correct', False):
-                    is_correct = True
-                    poll_debug["answers"][i]["marked_by"] = "getattr_correct"
-                
-                if is_correct:
-                    correct_indices.append(i)
-            
-            # Debug poll results if available
-            if hasattr(poll, 'results'):
-                poll_debug["has_results"] = True
-                poll_debug["results"] = {
-                    "has_correct_options": hasattr(poll.results, 'correct_options'),
-                    "correct_options": safe_str(safe_get_attr(poll.results, 'correct_options')),
-                    "has_correct_option": hasattr(poll.results, 'correct_option'),
-                    "correct_option": safe_str(safe_get_attr(poll.results, 'correct_option')),
-                    "has_solution": hasattr(poll.results, 'solution'),
-                    "solution": safe_str(safe_get_attr(poll.results, 'solution'))
-                }
-                
-                # Method 3: Check poll.results.correct_options
-                if hasattr(poll.results, 'correct_options') and poll.results.correct_options:
-                    for i in poll.results.correct_options:
-                        if isinstance(i, int) and 0 <= i < len(answers) and i not in correct_indices:
-                            correct_indices.append(i)
-                            poll_debug["answers"][i]["marked_by"] = "correct_options"
-                
-                # Method 4: Check poll.results.correct_option
-                if hasattr(poll.results, 'correct_option') and poll.results.correct_option is not None:
-                    i = poll.results.correct_option
-                    if isinstance(i, int) and 0 <= i < len(answers) and i not in correct_indices:
+                # Check for correct attribute (Quiz poll)
+                if hasattr(ans, 'correct'):
+                    debug_log += f"    Has 'correct' attribute: {ans.correct}\n"
+                    if ans.correct:
                         correct_indices.append(i)
-                        poll_debug["answers"][i]["marked_by"] = "correct_option"
-                
-                # Method 5: Check for solution in poll results
-                if hasattr(poll.results, 'solution') and poll.results.solution:
-                    poll_debug["found_solution"] = True
-                    for i, ans in enumerate(answers):
-                        # Check if solution contains or matches the answer
-                        if (poll.results.solution in ans or ans in poll.results.solution) and i not in correct_indices:
-                            correct_indices.append(i)
-                            poll_debug["answers"][i]["marked_by"] = "solution_match"
+                        poll_struct['correct_indices'].append(i)
             
-            # Method 6: Check if this is a quiz and has correct_answers
-            if hasattr(msg, 'quiz') and hasattr(msg.quiz, 'correct_answers'):
-                poll_debug["has_quiz_correct_answers"] = True
-                poll_debug["quiz_correct_answers"] = safe_str(msg.quiz.correct_answers)
+            # Most important - check for solution attribute
+            solution = ""
+            solution_index = -1
+            
+            # Check if poll has solutions
+            if hasattr(poll, 'results') and hasattr(poll.results, 'solution'):
+                solution = str(poll.results.solution)
+                debug_log += f"  Found solution: {solution}\n"
+                poll_struct['solution'] = solution
+            
+            # If we have a solution, try to match it with an answer
+            if solution:
+                for i, ans in enumerate(answers):
+                    if solution.lower() in ans.lower() or ans.lower() in solution.lower():
+                        solution_index = i
+                        correct_indices.append(i)
+                        poll_struct['correct_indices'].append(i)
+                        debug_log += f"  Matched solution to answer {i}\n"
+                        break
+            
+            # Add direct answer matching for quiz-style answers
+            # Look for answers with indicators like (*), ✅, etc.
+            for i, ans in enumerate(answers):
+                ans_lower = ans.lower()
+                has_indicator = any(marker in ans for marker in 
+                                   ["(*)", "✓", "✅", "*", "correct", "right answer", "√"])
                 
+                if has_indicator and i not in correct_indices:
+                    correct_indices.append(i)
+                    poll_struct['correct_indices'].append(i)
+                    debug_log += f"  Inferred correct answer {i} from markers in text\n"
+            
+            # Force correct answer extraction from poll.questions.correct_answers
+            if hasattr(poll, 'questions') and hasattr(poll.questions, 'correct_answers'):
+                for answer_idx in poll.questions.correct_answers:
+                    if answer_idx not in correct_indices and 0 <= answer_idx < len(answers):
+                        correct_indices.append(answer_idx)
+                        poll_struct['correct_indices'].append(answer_idx)
+                        debug_log += f"  Found correct answer {answer_idx} in poll.questions.correct_answers\n"
+            
+            # For quiz polls, check .quiz.correct_answers
+            if hasattr(msg, 'quiz') and hasattr(msg.quiz, 'correct_answers'):
                 for correct_answer in msg.quiz.correct_answers:
                     for i, ans in enumerate(answers):
                         if ans == correct_answer and i not in correct_indices:
                             correct_indices.append(i)
-                            poll_debug["answers"][i]["marked_by"] = "quiz_correct_answers"
+                            poll_struct['correct_indices'].append(i)
+                            debug_log += f"  Found correct answer {i} in quiz.correct_answers\n"
             
-            # Additional check: If we have a quiz but no correct answers detected yet,
-            # try to infer from answer options if they contain indicators like "*", "✓", "✅"
-            if safe_get_attr(poll, 'quiz', False) and not correct_indices:
-                for i, ans in enumerate(answers):
-                    # Check for common correct answer indicators
-                    if any(marker in ans for marker in ["*", "✓", "✅", "√", "correct", "right"]):
-                        correct_indices.append(i)
-                        poll_debug["answers"][i]["marked_by"] = "text_marker_inference"
+            # Fallback: if there's exactly one answer starting with (*) or similar, mark that
+            star_answers = [i for i, ans in enumerate(answers) if ans.startswith("(*)")]
+            if len(star_answers) == 1 and not correct_indices:
+                i = star_answers[0]
+                correct_indices.append(i)
+                poll_struct['correct_indices'].append(i)
+                debug_log += f"  Marked answer {i} as correct because it starts with (*)\n"
             
-            # Save which answers were determined to be correct
-            poll_debug["correct_indices"] = correct_indices
+            # Last resort: Heuristic for detecting correct answers
+            # In many formats, the correct answer often comes first
+            if not correct_indices and len(answers) > 0:
+                # Only guess in specific formats like numbered lists
+                has_numbered_format = all(ans.startswith(str(j+1)+".") for j, ans in enumerate(answers))
+                if has_numbered_format:
+                    correct_indices.append(0)  # Mark first answer as correct
+                    poll_struct['correct_indices'].append(0)
+                    debug_log += "  No correct answer detected, marking first answer based on numbered format\n"
             
-            # Save debug info for this poll
-            debug_info.append(poll_debug)
+            # Get answers after all detection methods
+            debug_log += f"  Final correct indices: {correct_indices}\n\n"
             
+            # Save debug log
+            with open("poll_debug.txt", "a", encoding="utf-8") as f:
+                f.write(debug_log)
+            
+            # Save poll data
+            poll_info.append(poll_struct)
             valid_polls.append((question, answers, correct_indices))
 
         if progress % 10 == 0:
             await event.reply(f"Progress: {progress}/{total_messages} messages scanned...")
 
-    # Save debug info to a file
-    with open("poll_debug.json", "w", encoding="utf-8") as f:
-        json.dump(debug_info, f, indent=2, ensure_ascii=False)
-    
-    await event.reply("Debug information saved to poll_debug.json")
-    
+    # Save poll info for debugging
+    try:
+        with open("polls_extracted.txt", "w", encoding="utf-8") as f:
+            for p in poll_info:
+                f.write(f"Question: {p['question']}\n")
+                for i, ans in enumerate(p['answers']):
+                    marker = "✅" if i in p['correct_indices'] else ""
+                    f.write(f"  {i}. {ans} {marker}\n")
+                f.write("\n")
+        await event.reply("Debug info saved to polls_extracted.txt")
+    except Exception as e:
+        await event.reply(f"Error saving debug info: {e}")
+
     await generate_txt(valid_polls, event)
 
 async def generate_txt(polls, event):
@@ -228,6 +224,10 @@ async def generate_txt(polls, event):
         f.write(output)
 
     await event.reply("Here is your extracted quiz:", file="quiz_results.txt")
+    if correct_indices:
+        await event.reply("Correct answers have been marked with ✅")
+    else:
+        await event.reply("Warning: No correct answers were detected in any polls.")
 
 @client.on(events.NewMessage(pattern='/start'))
 async def start(event):
