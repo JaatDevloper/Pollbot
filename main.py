@@ -7,9 +7,9 @@ import os
 app = Flask(__name__)
 
 # Telethon Client Setup with Active String Session
-api_id = 'your_api_id'  # Replace with your API ID
-api_hash = 'your_api_hash'  # Replace with your API hash
-session_string = 'your_active_string_session'  # Replace with your active string session
+api_id = '27488818'  # Replace with your API ID
+api_hash = '321fb972c3c3aee2dbdca1deeab39050'  # Replace with your API hash
+session_string = '1BVtsOKEBu1n1e48GEEoqRlPzUUy1CloJ4rwmCDOAfcyXvjPKoxgDTLfoypsaQxMKqqcXRTZ7Z7gACuECJuX8GnpAtiVMNTRQKMphB7j-Un7nILgKZ_EfYd1uwBMXN3WU1rPHsenQRxuhWsXcIx9T7hU2hF_za2l2saJhsj5N5WuvfazFBdX01sXV3y6PbCCYW4eSxBFhrcqR7cHoAoJWNlphdk7jygTHlltDbAt2aJzBKn_JBJgStE08OG5sFjkYQvnrMEJV7dpFjwPzW3akWHWGdFqdwNqDEz4yn6gnWP3wDZRsWOMy8r9FCmFpcx5V28g3d8L07XdkWtSHgDYoN9aK9kU1a9A='  # Replace with your active string session
 
 # Initialize the Telegram client with the existing string session
 client = TelegramClient('userbot', api_id, api_hash)
