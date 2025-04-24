@@ -1,102 +1,84 @@
-import asyncio
-import logging
-import re
+from telethon import TelegramClient
+from flask import Flask, jsonify, request
 import json
-import uvicorn
-from fastapi import FastAPI
-from telethon import events
-from telethon.sync import TelegramClient
-from telethon.sessions import StringSession
-from telethon.tl.types import MessageMediaPoll
-from telethon.tl.custom import Message
+import os
 
-# Logging
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+# Flask App Setup
+app = Flask(__name__)
 
-# Your credentials
-api_id = 27488818
-api_hash = '321fb972c3c3aee2dbdca1deeab39050'
-string_session = '1BVtsOKEBu1n1e48GEEoqRlPzUUy1CloJ4rwmCDOAfcyXvjPKoxgDTLfoypsaQxMKqqcXRTZ7Z7gACuECJuX8GnpAtiVMNTRQKMphB7j-Un7nILgKZ_EfYd1uwBMXN3WU1rPHsenQRxuhWsXcIx9T7hU2hF_za2l2saJhsj5N5WuvfazFBdX01sXV3y6PbCCYW4eSxBFhrcqR7cHoAoJWNlphdk7jygTHlltDbAt2aJzBKn_JBJgStE08OG5sFjkYQvnrMEJV7dpFjwPzW3akWHWGdFqdwNqDEz4yn6gnWP3wDZRsWOMy8r9FCmFpcx5V28g3d8L07XdkWtSHgDYoN9aK9kU1a9A='
+# Telethon Client Setup with Active String Session
+api_id = 'your_api_id'  # Replace with your API ID
+api_hash = 'your_api_hash'  # Replace with your API hash
+session_string = 'your_active_string_session'  # Replace with your active string session
 
-client = TelegramClient(StringSession(string_session), api_id, api_hash)
-quizzes = {}
+# Initialize the Telegram client with the existing string session
+client = TelegramClient('userbot', api_id, api_hash)
 
-# FastAPI setup for health check
-app = FastAPI()
+# Set the string session for client
+client.session.set_string(session_string)
 
-@app.get("/")
-def read_root():
-    return {"status": "ok"}
+# Path to save the extracted polls with IDs
+saved_polls_path = 'saved_polls.json'
 
-# Command handler
-@client.on(events.NewMessage(pattern=r'^/quiz (https://t\.me/.+?) (https://t\.me/.+?)$'))
-async def quiz_handler(event):
-    first_url, last_url = event.pattern_match.group(1), event.pattern_match.group(2)
-    await event.reply("Extracting quiz questions, please wait...")
+# Helper function to load saved polls from file
+def load_saved_polls():
+    if os.path.exists(saved_polls_path):
+        with open(saved_polls_path, 'r') as f:
+            return json.load(f)
+    return {}
 
-    try:
-        quiz_id = await extract_and_save_quiz(first_url, last_url)
-        await event.reply(f"Quiz saved with ID: {quiz_id}. Use /play {quiz_id} to replay it.")
-    except Exception as e:
-        await event.reply(f"Failed to extract quiz: {e}")
+# Helper function to save extracted polls to file
+def save_poll_data(polls_data):
+    with open(saved_polls_path, 'w') as f:
+        json.dump(polls_data, f)
 
-@client.on(events.NewMessage(pattern=r'^/play (\d+)$'))
-async def play_handler(event):
-    quiz_id = event.pattern_match.group(1)
-    if quiz_id not in quizzes:
-        await event.reply("Invalid quiz ID.")
-        return
+# Health check endpoint to ensure the bot is running
+@app.route('/health', methods=['GET'])
+def health_check():
+    return jsonify(status="OK", message="Userbot is healthy"), 200
 
-    for q in quizzes[quiz_id]:
-        await client.send_message(
-            entity=event.chat_id,
-            message="Quiz:"
-        )
-        await client.send_message(
-            entity=event.chat_id,
-            message=f"🧠 {q['question']}\nOptions:\n" +
-                    "\n".join([f"{idx+1}. {opt}" + (" ✅" if idx == q['correct_option_id'] else "")
-                               for idx, opt in enumerate(q['options'])])
-        )
+# Command to extract polls between two links
+@app.route('/extract_polls', methods=['GET'])
+def extract_polls():
+    first_poll_link = request.args.get('first_poll_link')
+    last_poll_link = request.args.get('last_poll_link')
 
-async def extract_and_save_quiz(first_url, last_url):
-    match1 = re.search(r'/(\d+)$', first_url)
-    match2 = re.search(r'/(\d+)$', last_url)
-    if not match1 or not match2:
-        raise ValueError("Invalid URLs.")
+    # Ensure the user is logged in before proceeding
+    if not client.is_user_authorized():
+        return jsonify(status="Error", message="User not authorized")
 
-    first_id = int(match1.group(1))
-    last_id = int(match2.group(1))
-    if first_id > last_id:
-        first_id, last_id = last_id, first_id
+    # Your logic to extract polls between first_poll_link and last_poll_link here
+    # Example: Extract poll data (pseudo code)
+    polls_data = []  # Assuming you have a function that fetches polls based on the links
 
-    entity = await client.get_entity('quizbot')
-    messages = await client.get_messages(entity, ids=range(first_id, last_id + 1))
+    # After extracting polls, save them with unique IDs
+    saved_polls = load_saved_polls()
+    new_poll_id = len(saved_polls) + 1
+    saved_polls[new_poll_id] = polls_data  # Store the extracted polls with an ID
 
-    quiz = []
-    for msg in messages:
-        if isinstance(msg, Message) and isinstance(msg.media, MessageMediaPoll):
-            poll = msg.media.poll
-            correct_id = next((i for i, opt in enumerate(poll.options) if getattr(opt, 'correct', False)), None)
-            quiz.append({
-                "question": poll.question,
-                "options": [opt.text for opt in poll.options],
-                "correct_option_id": correct_id
-            })
+    # Save the polls to file
+    save_poll_data(saved_polls)
 
-    quiz_id = str(len(quizzes) + 1)
-    quizzes[quiz_id] = quiz
-    return quiz_id
+    return jsonify(status="OK", message="Polls extracted and saved successfully")
 
-async def main():
-    await client.start()
-    print("Userbot is running...")
-    await client.run_until_disconnected()
+# Command to play a quiz using saved polls by ID
+@app.route('/play_quiz/<quiz_id>', methods=['GET'])
+def play_quiz(quiz_id):
+    saved_polls = load_saved_polls()
+    
+    # Retrieve the quiz by ID
+    if quiz_id in saved_polls:
+        quiz_data = saved_polls[quiz_id]
+        # Logic to start the quiz (send questions one by one)
+        return jsonify(status="OK", message="Quiz started", quiz_data=quiz_data)
+    else:
+        return jsonify(status="Error", message="Quiz ID not found")
 
-# Run both Telegram client and FastAPI
+# Main entry point
 if __name__ == '__main__':
-    loop = asyncio.get_event_loop()
-    loop.create_task(main())
-    uvicorn.run(app, host="0.0.0.0", port=8080)
+    # Start the Telethon client
+    client.start()
+
+    # Start the Flask server in the background
+    app.run(host='0.0.0.0', port=5000)
     
