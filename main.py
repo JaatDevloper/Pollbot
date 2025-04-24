@@ -5,7 +5,6 @@ from flask import Flask, jsonify, request
 from telethon import TelegramClient
 from telethon.sessions import StringSession
 import asyncio
-import threading
 
 # Flask App Setup
 app = Flask(__name__)
@@ -93,7 +92,7 @@ async def main():
 
     # Start Flask app
     from threading import Thread
-    flask_thread = Thread(target=lambda: app.run(host='0.0.0.0', port=5000))
+    flask_thread = Thread(target=lambda: app.run(host='0.0.0.0', port=5000, use_reloader=False))
     flask_thread.start()
 
 # Run everything inside an asyncio loop
