@@ -2,6 +2,8 @@ import asyncio
 import logging
 import re
 import json
+import uvicorn
+from fastapi import FastAPI
 from telethon import events
 from telethon.sync import TelegramClient
 from telethon.sessions import StringSession
@@ -18,8 +20,14 @@ api_hash = '321fb972c3c3aee2dbdca1deeab39050'
 string_session = '1BVtsOKEBu1n1e48GEEoqRlPzUUy1CloJ4rwmCDOAfcyXvjPKoxgDTLfoypsaQxMKqqcXRTZ7Z7gACuECJuX8GnpAtiVMNTRQKMphB7j-Un7nILgKZ_EfYd1uwBMXN3WU1rPHsenQRxuhWsXcIx9T7hU2hF_za2l2saJhsj5N5WuvfazFBdX01sXV3y6PbCCYW4eSxBFhrcqR7cHoAoJWNlphdk7jygTHlltDbAt2aJzBKn_JBJgStE08OG5sFjkYQvnrMEJV7dpFjwPzW3akWHWGdFqdwNqDEz4yn6gnWP3wDZRsWOMy8r9FCmFpcx5V28g3d8L07XdkWtSHgDYoN9aK9kU1a9A='
 
 client = TelegramClient(StringSession(string_session), api_id, api_hash)
-
 quizzes = {}
+
+# FastAPI setup for health check
+app = FastAPI()
+
+@app.get("/")
+def read_root():
+    return {"status": "ok"}
 
 # Command handler
 @client.on(events.NewMessage(pattern=r'^/quiz (https://t\.me/.+?) (https://t\.me/.+?)$'))
@@ -43,10 +51,7 @@ async def play_handler(event):
     for q in quizzes[quiz_id]:
         await client.send_message(
             entity=event.chat_id,
-            message="Quiz:",
-            buttons=None,
-            file=None,
-            parse_mode='html'
+            message="Quiz:"
         )
         await client.send_message(
             entity=event.chat_id,
@@ -89,7 +94,9 @@ async def main():
     print("Userbot is running...")
     await client.run_until_disconnected()
 
+# Run both Telegram client and FastAPI
 if __name__ == '__main__':
-    from telethon import events
-    asyncio.run(main())
+    loop = asyncio.get_event_loop()
+    loop.create_task(main())
+    uvicorn.run(app, host="0.0.0.0", port=8080)
     
