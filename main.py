@@ -24,7 +24,7 @@ app = Flask(__name__)
 def health_check():
     return "OK", 200
 
-user_states = {}  # Tracks state per user
+user_states = {}
 
 @client.on(events.NewMessage(pattern='/extract'))
 async def start_extract(event):
@@ -91,14 +91,12 @@ async def extract_polls(chat, first_id, last_id, event):
     await generate_txt(valid_polls, event)
 
 async def generate_txt(polls, event):
-    option_labels = ['A', 'B', 'C', 'D']
     output = ""
     for idx, (question, answers, correct) in enumerate(polls, 1):
-        output += f"Q{idx}. {question}\n"
-        for i, ans in enumerate(answers):
-            mark = "✅" if ans == correct else "⬜"
-            label = option_labels[i] if i < len(option_labels) else f"({i+1})"
-            output += f"  {mark} {label}. {ans}\n"
+        output += f"{question}\n"
+        for ans in answers:
+            mark = " ✅" if ans == correct else ""
+            output += f"{ans}{mark}\n"
         output += "\n"
 
     with open("quiz_results.txt", "w", encoding="utf-8") as f:
