@@ -1,7 +1,9 @@
-from telethon import TelegramClient
-from flask import Flask, jsonify, request
-import json
 import os
+import json
+from flask import Flask, jsonify, request
+from telethon import TelegramClient
+from telethon.sessions import StringSession
+import asyncio
 
 # Flask App Setup
 app = Flask(__name__)
@@ -12,10 +14,7 @@ api_hash = '321fb972c3c3aee2dbdca1deeab39050'  # Replace with your API hash
 session_string = '1BVtsOKEBu1n1e48GEEoqRlPzUUy1CloJ4rwmCDOAfcyXvjPKoxgDTLfoypsaQxMKqqcXRTZ7Z7gACuECJuX8GnpAtiVMNTRQKMphB7j-Un7nILgKZ_EfYd1uwBMXN3WU1rPHsenQRxuhWsXcIx9T7hU2hF_za2l2saJhsj5N5WuvfazFBdX01sXV3y6PbCCYW4eSxBFhrcqR7cHoAoJWNlphdk7jygTHlltDbAt2aJzBKn_JBJgStE08OG5sFjkYQvnrMEJV7dpFjwPzW3akWHWGdFqdwNqDEz4yn6gnWP3wDZRsWOMy8r9FCmFpcx5V28g3d8L07XdkWtSHgDYoN9aK9kU1a9A='  # Replace with your active string session
 
 # Initialize the Telegram client with the existing string session
-client = TelegramClient('userbot', api_id, api_hash)
-
-# Set the string session for client
-client.session.set_string(session_string)
+client = TelegramClient(StringSession(session_string), api_id, api_hash)
 
 # Path to save the extracted polls with IDs
 saved_polls_path = 'saved_polls.json'
@@ -75,10 +74,24 @@ def play_quiz(quiz_id):
         return jsonify(status="Error", message="Quiz ID not found")
 
 # Main entry point
-if __name__ == '__main__':
-    # Start the Telethon client
-    client.start()
+async def main():
+    await client.start()
+    print("Userbot is running...")
 
-    # Start the Flask server in the background
-    app.run(host='0.0.0.0', port=5000)
+    # Run any additional logic after starting the client (like sending messages or handling updates)
+
+# Start the Flask server and Telethon client together
+if __name__ == '__main__':
+    # Start the Telethon client in a separate thread
+    from threading import Thread
+
+    def run_flask():
+        app.run(host='0.0.0.0', port=5000)
+
+    # Start Flask in a background thread
+    flask_thread = Thread(target=run_flask)
+    flask_thread.start()
+
+    # Run the Telethon client
+    asyncio.run(main())
     
