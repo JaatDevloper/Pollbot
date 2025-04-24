@@ -91,21 +91,20 @@ async def extract_polls(chat, first_id, last_id, event):
     await generate_txt(valid_polls, event)
 
 async def generate_txt(polls, event):
-    import string
+    option_labels = ['A', 'B', 'C', 'D']
     output = ""
-    option_labels = list(string.ascii_uppercase)
     for idx, (question, answers, correct) in enumerate(polls, 1):
-        output += f"{question.strip()}\n"
+        output += f"Q{idx}. {question}\n"
         for i, ans in enumerate(answers):
-            mark = " ✅" if ans == correct else ""
-            output += f"({option_labels[i]}) {ans}{mark}\n"
+            mark = "✅" if ans == correct else "⬜"
+            label = option_labels[i] if i < len(option_labels) else f"({i+1})"
+            output += f"  {mark} {label}. {ans}\n"
         output += "\n"
 
     with open("quiz_results.txt", "w", encoding="utf-8") as f:
         f.write(output)
 
     await event.reply("Here is your extracted quiz:", file="quiz_results.txt")
-
 
 @client.on(events.NewMessage(pattern='/start'))
 async def start(event):
