@@ -119,11 +119,17 @@ async def generate_txt(polls, event):
     for idx, (question, answers, correct_indices) in enumerate(polls, 1):
         output += f"{question}\n"
         
-        # Create answer options with proper letter labels
         for i, ans in enumerate(answers):
-            letter = chr(97 + i)  # Convert 0, 1, 2... to a, b, c...
-            mark = " ✅" if i in correct_indices else ""
-            output += f"({letter}) {ans}{mark}\n"
+            # Check if the answer already starts with (a), (b), etc.
+            if ans.strip().startswith('(') and len(ans) > 3 and ans[1].isalpha() and ans[2] == ')':
+                # It already has a label, just add the check mark if needed
+                mark = " ✅" if i in correct_indices else ""
+                output += f"{ans}{mark}\n"
+            else:
+                # Need to add the label
+                letter = chr(97 + i)  # Convert 0, 1, 2... to a, b, c...
+                mark = " ✅" if i in correct_indices else ""
+                output += f"({letter}) {ans}{mark}\n"
         
         output += "\n"
 
