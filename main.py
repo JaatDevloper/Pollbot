@@ -1,13 +1,18 @@
 import os
 import json
+import logging
 from flask import Flask, jsonify, request
 from telethon import TelegramClient
 from telethon.sessions import StringSession
 import asyncio
-from threading import Thread
+import threading
 
 # Flask App Setup
 app = Flask(__name__)
+
+# Setup logging
+logging.basicConfig(level=logging.DEBUG)
+logger = logging.getLogger(__name__)
 
 # Telethon Client Setup with Active String Session
 api_id = '27488818'  # Replace with your API ID
@@ -73,24 +78,27 @@ def play_quiz(quiz_id):
     else:
         return jsonify(status="Error", message="Quiz ID not found")
 
-# Main entry point
+# Main entry point for the Telethon client
+async def start_telethon():
+    try:
+        await client.start()
+        logger.info("Userbot started and logged in successfully.")
+    except Exception as e:
+        logger.error(f"Error while starting the Telethon client: {e}")
+
+# Start Flask and Telethon client together
 async def main():
-    await client.start()
-    print("Userbot is running...")
+    # Start Telethon client
+    await start_telethon()
 
-    # Run any additional logic after starting the client (like sending messages or handling updates)
-
-# Start the Flask server and Telethon client together
-def start_telethon_and_flask():
-    # Start the Telethon client in the main event loop
-    asyncio.run(main())
-
-    # Start Flask in a separate thread
-    app.run(host='0.0.0.0', port=5000)
-
-# Start both Flask and Telethon in separate threads
-if __name__ == '__main__':
-    # Run Telethon and Flask together in a separate thread
-    flask_thread = Thread(target=start_telethon_and_flask)
+    # Start Flask app
+    from threading import Thread
+    flask_thread = Thread(target=lambda: app.run(host='0.0.0.0', port=5000))
     flask_thread.start()
-    
+
+# Run everything inside an asyncio loop
+if __name__ == '__main__':
+    try:
+        asyncio.run(main())
+    except Exception as e:
+        logger.error(f"Error: {e}")
