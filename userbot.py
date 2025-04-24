@@ -13,9 +13,9 @@ logger = logging.getLogger(__name__)
 quizzes = {}
 
 # Set up the Telegram client (Telethon userbot)
-api_id = 'YOUR_API_ID'
-api_hash = 'YOUR_API_HASH'
-string_session = 'YOUR_STRING_SESSION'  # Use the string session
+api_id = '27488818'
+api_hash = '321fb972c3c3aee2dbdca1deeab39050'
+string_session = '1BVtsOKEBu1n1e48GEEoqRlPzUUy1CloJ4rwmCDOAfcyXvjPKoxgDTLfoypsaQxMKqqcXRTZ7Z7gACuECJuX8GnpAtiVMNTRQKMphB7j-Un7nILgKZ_EfYd1uwBMXN3WU1rPHsenQRxuhWsXcIx9T7hU2hF_za2l2saJhsj5N5WuvfazFBdX01sXV3y6PbCCYW4eSxBFhrcqR7cHoAoJWNlphdk7jygTHlltDbAt2aJzBKn_JBJgStE08OG5sFjkYQvnrMEJV7dpFjwPzW3akWHWGdFqdwNqDEz4yn6gnWP3wDZRsWOMy8r9FCmFpcx5V28g3d8L07XdkWtSHgDYoN9aK9kU1a9A='  # Use the string session
 client = TelegramClient(StringSession(string_session), api_id, api_hash)
 
 # Command to start a new quiz
