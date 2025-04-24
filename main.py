@@ -64,24 +64,33 @@ def extract_polls():
 @app.route('/play_quiz/<quiz_id>', methods=['GET'])
 def play_quiz(quiz_id):
     saved_polls = load_saved_polls()
-    
+
     # Retrieve the quiz by ID
     if quiz_id in saved_polls:
         quiz_data = saved_polls[quiz_id]
+        # Logic to start the quiz (send questions one by one)
         return jsonify(status="OK", message="Quiz started", quiz_data=quiz_data)
     else:
         return jsonify(status="Error", message="Quiz ID not found")
 
-# Main entry point to start the client and Flask server
-def start_telethon_and_flask():
-    # Start the Telethon client asynchronously
-    asyncio.run(client.start())
+# Main entry point
+async def main():
+    await client.start()
+    print("Userbot is running...")
 
-    # Start the Flask server
+    # Run any additional logic after starting the client (like sending messages or handling updates)
+
+# Start the Flask server and Telethon client together
+def start_telethon_and_flask():
+    # Start the Telethon client in the main event loop
+    asyncio.run(main())
+
+    # Start Flask in a separate thread
     app.run(host='0.0.0.0', port=5000)
 
+# Start both Flask and Telethon in separate threads
 if __name__ == '__main__':
-    # Start Telethon and Flask in parallel using threading
-    thread = Thread(target=start_telethon_and_flask)
-    thread.start()
+    # Run Telethon and Flask together in a separate thread
+    flask_thread = Thread(target=start_telethon_and_flask)
+    flask_thread.start()
     
