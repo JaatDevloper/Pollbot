@@ -74,7 +74,7 @@ async def play_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             correct_option_id=correct_id,
             is_anonymous=False
         )
-        await asyncio.sleep(1)
+        await asyncio.sleep(1.5)
 
 # Handle messages
 async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -157,4 +157,3 @@ def main():
 
 if __name__ == '__main__':
     main()
-    
