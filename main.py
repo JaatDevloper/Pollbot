@@ -2,6 +2,7 @@ import asyncio
 import logging
 import re
 import json
+from telethon import events
 from telethon.sync import TelegramClient
 from telethon.sessions import StringSession
 from telethon.tl.types import MessageMediaPoll
