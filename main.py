@@ -95,7 +95,7 @@ async def generate_txt(polls, event):
     for idx, (question, answers, correct) in enumerate(polls, 1):
         output += f"{question}\n"
         for ans in answers:
-            mark = " ✅" if ans == correct else ""
+            mark = " ✅" if correct and ans.strip() == correct.strip() else ""
             output += f"{ans}{mark}\n"
         output += "\n"
 
