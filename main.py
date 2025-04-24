@@ -21,7 +21,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # Bot token from BotFather - you'll need to replace this with your actual token
-BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
+BOT_TOKEN = os.environ.get("7443584461:AAFyeaZs4YIujxe5bWu9sGzMEHgTAUd8kDs")
 if not BOT_TOKEN:
     raise ValueError("No bot token found. Set the TELEGRAM_BOT_TOKEN environment variable.")
 
