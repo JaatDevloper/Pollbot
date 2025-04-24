@@ -1,6 +1,5 @@
 from telethon import TelegramClient, events
 from telethon.sessions import StringSession
-from telethon.tl.types import InputPollAnswerVote
 from telethon.tl.functions.messages import SendVoteRequest, GetPollResultsRequest
 import os
 import asyncio
@@ -115,8 +114,6 @@ async def extract_polls(chat, first_id, last_id, event):
                 # The trick is to vote in the poll first
                 # This gives your session access to the correct answer data
                 if len(answers) > 0 and hasattr(poll, 'poll'):
-                    poll_id = poll.poll.id
-                    
                     # Try to vote for the first option - this is how we get access to results
                     vote_result = await client(SendVoteRequest(
                         peer=entity,
